@@ -20,10 +20,7 @@ use std::fmt::Display;
 
 use arrow_array::{Date32Array, Date64Array};
 use arrow_schema::DataType;
-use datafusion_common::{
-    internal_datafusion_err, internal_err, not_impl_err, plan_err, Column, Result,
-    ScalarValue,
-};
+use datafusion_common::{internal_datafusion_err, internal_err, not_impl_err, plan_err, Column, Result, ScalarValue, DataFusionError};
 use datafusion_expr::{
     expr::{Alias, Exists, InList, ScalarFunction, Sort, WindowFunction},
     Between, BinaryExpr, Case, Cast, Expr, Like, Operator,
@@ -388,8 +385,23 @@ impl Unparser<'_> {
                     expr: Box::new(sql_parser_expr),
                 })
             }
-            Expr::ScalarVariable(_, _) => {
-                not_impl_err!("Unsupported Expr conversion: {expr:?}")
+            Expr::ScalarVariable(_, variable_names) => {
+                match variable_names.as_slice() {
+                    [single_name] => {
+                        Ok(AstExpr::Identifier(Ident {
+                            value: single_name.clone(),
+                            quote_style: None,
+                        }))
+                    },
+                    names if names.len() > 1 => {
+                        let joined_names = names.join(".");
+                        Ok(AstExpr::Identifier(Ident {
+                            value: joined_names,
+                            quote_style: None,
+                        }))
+                    },
+                    _ => plan_err!("Expected at least one variable name")
+                }
             }
             Expr::IsNull(expr) => {
                 Ok(ast::Expr::IsNull(Box::new(self.expr_to_sql(expr)?)))
